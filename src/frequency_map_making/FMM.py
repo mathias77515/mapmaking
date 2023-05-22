@@ -25,10 +25,11 @@ import time
 ### PyOperators
 from pyoperators import *
 
+### Modfied PCG to display execution time
 from cg import pcg
 
 
-
+### Variables
 seed = int(sys.argv[1])
 iteration = int(sys.argv[2])
 band = int(sys.argv[3])
@@ -43,8 +44,6 @@ import qubic
 import frequency_acquisition as Acq
 from noise_timeline import QubicNoise, QubicWideBandNoise
 from planck_timeline import ExternalData2Timeline
-
-
 
 ### PySimulators
 from pysimulators.interfaces.healpy import HealpixConvolutionGaussianOperator
@@ -65,8 +64,13 @@ if rank == 0:
 
 def get_pySM_maps(sky, nu):
     return np.array(sky.get_emission(nu * u.GHz, None).T * utils.bandpass_unit_conversion(nu*u.GHz, None, u.uK_CMB))
+
+
 def get_dict(args={}):
     
+    '''
+    Function for modify the qubic dictionary.
+    '''
     ### Get the default dictionary
     dictfilename = 'dicts/pipeline_demo.dict'
     d = qubic.qubicdict.qubicDict()
@@ -78,6 +82,11 @@ def get_dict(args={}):
     
     return d
 def load_config(config_file):
+
+    '''
+    Read the configuration file.
+    '''
+
     # Créer un objet ConfigParser
     config = configparser.ConfigParser()
 
@@ -106,6 +115,7 @@ def load_config(config_file):
             # Définir chaque option de configuration en tant que variable globale
             globals()[option] = value
 
+### Read configuration file
 load_config('config.ini')
 relative_bandwidth = 0.25
 
@@ -154,6 +164,7 @@ dmono = get_dict({'npointings':npointings, 'nf_recon':1, 'nf_sub':1, 'nside':nsi
 
 center = qubic.equ2gal(0, -57)
 
+### Define acquisitions
 if band == 150 or band == 220:
     a = Acq.QubicIntegrated(d, Nsub=nsub, Nrec=nrec)
     atod = Acq.QubicIntegrated(d, Nsub=nsub, Nrec=nsub)
@@ -172,6 +183,7 @@ myfwhm = np.sqrt(a.allfwhm**2 - a.allfwhm[-1]**2)
 H = joint.get_operator(convolution=convolution, myfwhm=myfwhm)
 Htod = atod.get_operator(convolution=convolution)
 
+### Compute inverse-noise covariance matrix in time domain
 if band == 150 or band == 220:
     invN = joint.get_invntt_operator(True, True)
     cov = a.get_coverage()
@@ -187,56 +199,36 @@ seenpix = covnorm > covcut
 ######################### Sky model ###########################
 ###############################################################
 
-### We define foregrounds model
+### We define components
 skyconfig = {'cmb':seed}
 if dust:
     skyconfig['dust'] = 'd0'
 
+### Sub-maps
 m_nu = ExternalData2Timeline(skyconfig, a.allnus, nrec, nside=nside, corrected_bandpass=bandpass_correction).m_nu
+
+### Frequency maps
 mean_sky = ExternalData2Timeline(skyconfig, a.allnus, nrec, nside=nside, corrected_bandpass=bandpass_correction).maps
-
-'''
-
-
-sky = Acq.Sky(skyconfig, a)
-sky_fg = Acq.Sky({'dust':'d0'}, a)
-m_nu_fg = sky_fg.scale_component(beta=1.54)
-
-if dust:
-    m_nu = sky.scale_component(beta=1.54)
-else:
-    m_nu = np.array([sky.cmb*np.ones(sky.cmb.shape)]*nsub)
-    
-k=0
-if bandpass_correction:
-    for i in range(nrec):
-        delta = m_nu_fg[i*f:(i+1)*f] - np.mean(m_nu_fg[i*f:(i+1)*f], axis=0)
-        for j in range(f):
-            m_nu[k] -= delta[j]
-            k+=1
-
-
-mean_sky = np.zeros((nrec, 12*nside**2, 3))
-for i in range(nrec):
-    if rank == 0:
-        print(f'Doing average of m_nu between {np.min(a.allnus[i*f:(i+1)*f])} GHz and {np.max(a.allnus[i*f:(i+1)*f])} GHz')
-    mean_sky[i] = np.mean(m_nu[i*f:(i+1)*f], axis=0)
-'''
 
 ###############################################################
 ######################### Making TODs #########################
 ###############################################################
 
+### Factor sub
 f = int(nsub/nrec)
 
 if rank == 0:
     print('\n***** Making TODs ******\n')
 
+
+### Define noise configuration
 R = ReshapeOperator((12*nside**2, 3), 3*12*nside**2)
 npho = False
 if npho150 == True or npho220 == True:
     npho = True
 
+
+### Fix the seed of Planck data for noise
 comm.Barrier()
 if rank == 0:
     np.random.seed(int(str(int(time.time()*1e6))[-8:]))
@@ -244,20 +236,24 @@ if rank == 0:
 else:
     seed_noise_pl = None
 
+### Share seed between all precessus
 seed_noise_pl = comm.bcast(seed_noise_pl, root=0)
 
 if rank == 0:
     for i in range(size):
         print(f'seed for planck noise is {seed_noise_pl} for rank = {rank}')
 
+### Create QUBIC noise
 if band == 150 or band == 220:
     nq = QubicNoise(band, npointings, comm=comm, size=d['nprocs_instrument']).total_noise(int(ndet), int(npho)).ravel()
 else:
     nq = QubicWideBandNoise(d, npointings).total_noise(int(ndet), int(npho150), int(npho220)).ravel()
 
-
+### QUBIC TODs
 TOD_QUBIC = Htod(m_nu).ravel() + nq
 
+
+### Create Planck TODs
 if band == 150 or band == 220:
     TOD_PLANCK = np.zeros((nrec, 12*nside**2, 3))
     npl = planck_acquisition.get_noise(seed_noise_pl) * level_planck_noise
@@ -301,9 +297,11 @@ else:
         TOD_PLANCK[1] = C(mean_sky[0] + npl217)
     
     TOD_PLANCK = TOD_PLANCK.ravel()
-      
+
+### Full TOD   
 TOD = np.r_[TOD_QUBIC.ravel(), TOD_PLANCK.ravel()]
 
+### Wait for all processus
 comm.Barrier()
 ###############################################################
 ########################## Operators ##########################
@@ -330,7 +328,7 @@ with rule_manager(none=True):
 
 ### Preconditionning
 M = Acq.get_preconditioner(np.ones(12*nside**2))
-stop
+
 ### PCG
 if rank == 0:
     print('\n***** PCG ******\n')
