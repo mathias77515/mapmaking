@@ -1,6 +1,7 @@
 import numpy as np
 import qubic
 import sys
+import os
 sys.path.append(os.path.dirname(os.getcwd()))
 CMB_FILE = os.path.dirname(os.getcwd()) + '/data/'
 #from qubic.data import PATH
