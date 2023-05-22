@@ -1,2 +1,4 @@
-Frequency Map-Making
+# Frequency Map-Making
+
+This folder contain python script and bash script for computing cluster computation. It allow to perform the frequency map-making for QUBIC experiments, to reconstructe several sub-bands within physical band. 
 
