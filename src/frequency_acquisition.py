@@ -22,10 +22,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pysm3
 import sys
+import os
 sys.path.append(os.path.dirname(os.getcwd()))
 CMB_FILE = os.path.dirname(os.getcwd()) + '/data/'
 import gc
-import os
 import time
 import warnings
 warnings.filterwarnings("ignore")
