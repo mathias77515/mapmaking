@@ -1,6 +1,9 @@
 import numpy as np
 import qubic
-from qubic.data import PATH
+import sys
+sys.path.append(os.path.dirname(os.getcwd()))
+CMB_FILE = os.path.dirname(os.getcwd()) + '/data/'
+#from qubic.data import PATH
 import pysm3
 import pysm3.units as u
 from pysm3 import utils
@@ -38,11 +41,11 @@ class ExternalData2Timeline:
         
     def give_cl_cmb(self, r=0, Alens=1.):
         
-        power_spectrum = hp.read_cl(PATH+'Cls_Planck2018_lensed_scalar.fits')[:,:4000]
+        power_spectrum = hp.read_cl(CMB_FILE+'Cls_Planck2018_lensed_scalar.fits')[:,:4000]
         if Alens != 1.:
             power_spectrum[2] *= Alens
         if r:
-            power_spectrum += r * hp.read_cl(PATH+'Cls_Planck2018_unlensed_scalar_and_tensor_r1.fits')[:,:4000]
+            power_spectrum += r * hp.read_cl(CMB_FILE+'Cls_Planck2018_unlensed_scalar_and_tensor_r1.fits')[:,:4000]
         return power_spectrum
     
     def get_cmb(self, r=0, Alens=1, seed=None):
