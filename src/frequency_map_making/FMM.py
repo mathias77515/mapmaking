@@ -14,8 +14,8 @@ import healpy as hp
 import pysm3.units as u
 from pysm3 import utils
 import sys
-sys.path.append('/pbs/home/m/mregnier/sps1/mapmaking')
 import os
+path = os.path.dirname(os.getcwd()) + '/data/'
 import os.path as op
 import configparser
 import pickle
