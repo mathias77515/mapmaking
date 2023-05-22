@@ -16,6 +16,7 @@ from pysm3 import utils
 import sys
 import os
 path = os.path.dirname(os.getcwd()) + '/data/'
+sys.path.append(os.path.dirname(os.getcwd()))
 import os.path as op
 import configparser
 import pickle
