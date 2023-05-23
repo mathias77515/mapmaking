@@ -16,13 +16,13 @@ import matplotlib.pyplot as plt
 import time
 import sys
 
-filename = '/pbs/home/m/mregnier/sps1/mapmaking/frequency_map_making/Dls_1_band150220_011_ndetFalse_npho150True_npho220True_iteration20.pkl'#str(sys.argv[1])
+filename = '/pbs/home/m/mregnier/sps1/mapmaking/frequency_map_making/spectrum/Dls_1_band150220_011_ndetFalse_npho150True_npho220True_iteration20.pkl'#str(sys.argv[1])
 
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
 
-CMB_CL_FILE = '/pbs/home/m/mregnier/sps1/mapmaking'+'/Cls_Planck2018_'
+CMB_CL_FILE = '/pbs/home/m/mregnier/sps1/mapmaking/frequency_map_making/data'+'/Cls_Planck2018_'
 
 def open_pkl(file):
     with open(file, 'rb') as f:
@@ -317,10 +317,10 @@ def cosmo_like(datafile, rv):
     print(f'Doing estimation from r = {rv.min()} to r = {rv.max()}')
 
     err = np.std(data['DlsBB'], axis=0)*np.sqrt(2)
-    #mean_cl = mymodel(data['leff'], 0)
+    mean_cl = mymodel(data['leff'], 0)
     #err = np.cov(data['DlsBB'], rowvar=False)
 
-    mean_cl = np.mean(data['DlsBB'][:-1], axis=0)
+    #mean_cl = np.mean(data['DlsBB'][:-1], axis=0)
     like_split, _, _, _ = like.explore_like(data['leff'][:-1], mean_cl[:-1], err[:-1], rv, maskpix=None, sample_variance=False)
 
     return like_split, data, mean_cl, err
