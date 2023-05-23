@@ -2,8 +2,8 @@
 import qubic
 import sys
 import os
-path = os.path.dirname(os.getcwd()) + '/data/'
-sys.path.append(os.path.dirname(os.getcwd()))
+path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
+sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))))
 
 import component_acquisition as Acq
 import pickle
@@ -134,7 +134,8 @@ if rank == 0:
 
 save_each_ite = f'{type}_ndet{ndet}_pho150{npho150}_pho220{npho220}_seed{seed}_iteration{iteration}'
 if rank == 0:
-    os.makedirs(save_each_ite)
+    pass
+    #os.makedirs(save_each_ite)
 path_to_save = str(save_each_ite)
 
 #########################################################################################################
@@ -256,7 +257,7 @@ elif type == 'Two':
     tod[:(myqubic.Ndets*myqubic.Nsamples)] = _r.T(G150 * _r(tod[:(myqubic.Ndets*myqubic.Nsamples)]))
     tod[(myqubic.Ndets*myqubic.Nsamples):(2*myqubic.Ndets*myqubic.Nsamples)] = _r.T(G220 * _r(tod[(myqubic.Ndets*myqubic.Nsamples):(2*myqubic.Ndets*myqubic.Nsamples)]))
     print('Gain 150 : ', g150[:5])
-    print('Gain 200 : ', g220[:5])
+    print('Gain 220 : ', g220[:5])
 
 if type == 'Wide':
     nq = QubicWideBandNoise(d, npointings).total_noise(int(ndet), int(npho150), int(npho220)).ravel()
@@ -296,7 +297,7 @@ for i in range(len(comp)):
 
     if comp_name[i] == 'CMB':
         np.random.seed(42)
-        comp_for_pcg[i] = Ctrue(components[i])# * (np.random.randn(12*nside**2, 3)*1)
+        comp_for_pcg[i] = Ctrue(components[i]) * (np.random.randn(12*nside**2, 3)*1)
     elif comp_name[i] == 'DUST':
         comp_for_pcg[i] = Ctrue(components[i])
     elif comp_name[i] == 'SYNCHROTRON':
@@ -450,9 +451,9 @@ if save_each_ite is not None:
                 
     dict_i = {'maps':components, 'initial':comp_for_pcg, 'beta':beta, 'allfwhm':myqubic.allfwhm, 'coverage':coverage, 'convergence':1, 'execution_time':0}
 
-    output = open(path_to_save+'/Iter0_maps_beta_gain_rms_maps.pkl', 'wb')
-    pickle.dump(dict_i, output)
-    output.close()
+    #output = open(path_to_save+'/Iter0_maps_beta_gain_rms_maps.pkl', 'wb')
+    #pickle.dump(dict_i, output)
+    #output.close()
 
 del H
 gc.collect()
@@ -557,9 +558,9 @@ while k < kmax :
         if save_each_ite is not None:
             dict_i = {'maps':components_i, 'beta':beta_i, 'allfwhm':myqubic.allfwhm, 'coverage':coverage, 'convergence':solution['error']}
     
-            output = open(path_to_save+'/Iter{}_maps_beta_gain_rms_maps.pkl'.format(k+1), 'wb')
-            pickle.dump(dict_i, output)
-            output.close()
+            #output = open(path_to_save+'/Iter{}_maps_beta_gain_rms_maps.pkl'.format(k+1), 'wb')
+            #pickle.dump(dict_i, output)
+            #output.close()
 
 
     k+=1

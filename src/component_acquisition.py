@@ -18,8 +18,8 @@ import pysm3
 import gc
 import os
 import sys
-path = os.path.dirname(os.getcwd()) + '/data/'
-sys.path.append(os.path.dirname(os.getcwd()))
+path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
+print('path', path)
 import time
 import warnings
 warnings.filterwarnings("ignore")
@@ -38,8 +38,6 @@ from pysimulators import *
 from pyoperators import *
 from pysimulators.interfaces.healpy import HealpixConvolutionGaussianOperator
 
-CMB_FILE = os.path.dirname(os.path.abspath(__file__))+'/'
-
 __all__ = ['QubicIntegratedComponentsMapMaking',
            'QubicWideBandComponentsMapMaking',
            'QubicTwoBandsComponentsMapMaking',
@@ -48,8 +46,8 @@ __all__ = ['QubicIntegratedComponentsMapMaking',
 
 def polarized_I(m, nside, polarization_fraction=0.01):
     
-    polangle = hp.ud_grade(hp.read_map(CMB_FILE+'/psimap_dust90_512.fits'), nside)
-    depolmap = hp.ud_grade(hp.read_map(CMB_FILE+'/gmap_dust90_512.fits'), nside)
+    polangle = hp.ud_grade(hp.read_map(path+'/psimap_dust90_512.fits'), nside)
+    depolmap = hp.ud_grade(hp.read_map(path+'/gmap_dust90_512.fits'), nside)
     cospolangle = np.cos(2.0 * polangle)
     sinpolangle = np.sin(2.0 * polangle)
 

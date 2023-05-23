@@ -1,5 +1,6 @@
 import qubic
 import frequency_acquisition
+import numpy as np
 
 class QubicNoise:
     
@@ -70,4 +71,21 @@ class QubicWideBandNoise:
         return ndet + npho150 + npho220
         
 
+class QubicDualBandNoise:
+
+    def __init__(self, d, npointings):
+
+        self.d = d
+        self.npointings = npointings
+
+    def total_noise(self, wdet, wpho150, wpho220):
+        
+        Qubic150 = QubicNoise(150, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'])
+        Qubic220 = QubicNoise(220, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'])
+        
+        ndet = wdet * Qubic150.detector_noise().ravel()
+        npho150 = wpho150 * Qubic150.photon_noise().ravel()
+        npho220 = wpho220 * Qubic220.photon_noise().ravel()
+        
+        return np.r_[ndet + npho150, ndet + npho220]
 

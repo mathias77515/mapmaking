@@ -24,7 +24,7 @@ import pysm3
 import sys
 import os
 sys.path.append(os.path.dirname(os.getcwd()))
-CMB_FILE = os.path.dirname(os.getcwd()) + '/data/'
+path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
 import gc
 import time
 import warnings
@@ -88,7 +88,7 @@ def create_array(name, nus, nside):
         shape=(2, 12*nside**2, 3)
     else:
         shape=len(nus)
-    pkl_file = open(CMB_FILE+'AllDataSet_Components_MapMaking.pkl', 'rb')
+    pkl_file = open(path+'AllDataSet_Components_MapMaking.pkl', 'rb')
     dataset = pickle.load(pkl_file)
 
     myarray=np.zeros(shape)
@@ -108,11 +108,11 @@ def get_preconditioner(cov):
 def arcmin2rad(arcmin):
     return arcmin * 0.000290888
 def give_cl_cmb(r=0, Alens=1.):
-    power_spectrum = hp.read_cl(CMB_FILE+'Cls_Planck2018_lensed_scalar.fits')[:,:4000]
+    power_spectrum = hp.read_cl(path+'Cls_Planck2018_lensed_scalar.fits')[:,:4000]
     if Alens != 1.:
         power_spectrum[2] *= Alens
     if r:
-        power_spectrum += r * hp.read_cl(CMB_FILE+'Cls_Planck2018_unlensed_scalar_and_tensor_r1.fits')[:,:4000]
+        power_spectrum += r * hp.read_cl(path+'Cls_Planck2018_unlensed_scalar_and_tensor_r1.fits')[:,:4000]
     return power_spectrum
 def rad2arcmin(rad):
     return rad / 0.000290888
