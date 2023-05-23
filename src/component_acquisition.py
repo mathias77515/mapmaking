@@ -12,11 +12,6 @@
 
 # QUBIC stuff
 import qubic
-from qubicpack.utilities import Qubic_DataDir
-from qubic.data import PATH
-from qubic.io import read_map
-from qubic.scene import QubicScene
-from qubic.samplings import create_random_pointings, get_pointing
 
 # General stuff
 import healpy as hp
@@ -25,6 +20,9 @@ import numpy as np
 import pysm3
 import gc
 import os
+import sys
+path = os.path.dirname(os.getcwd()) + '/data/'
+sys.path.append(os.path.dirname(os.getcwd()))
 import time
 import warnings
 warnings.filterwarnings("ignore")
@@ -33,13 +31,11 @@ from importlib import reload
 from pysm3 import utils
 
 from frequency_acquisition import compute_fwhm_to_convolve, arcmin2rad, give_cl_cmb, create_array, get_preconditioner, QubicPolyAcquisition, QubicAcquisition
-import wide_instrument as instr
-import instrument as binstr
+import instrument as instr
 # FG-Buster packages
 import component_model as c
 import mixing_matrix as mm
 import pickle
-import ComponentsMapMakingTools as CMMTools
 # PyOperators stuff
 from pysimulators import *
 from pyoperators import *
@@ -64,6 +60,110 @@ def polarized_I(m, nside, polarization_fraction=0.01):
     return P_map * np.array([cospolangle, sinpolangle])
 
 
+
+def get_allA(nc, nf, npix, beta, nus, comp):
+    # Initialize arrays to store mixing matrix values
+    allA = np.zeros((beta.shape[0], nf, nc))
+    allA_pix = np.zeros((npix, nf, nc))
+
+    # Loop through each element of beta to calculate mixing matrix
+    for i in range(beta.shape[0]):
+        allA[i] = get_mixingmatrix(beta[i], nus, comp)
+
+    # Check if beta and npix are equal
+    if beta.shape[0] != npix:
+        # Upgrade resolution if not equal
+        for i in range(nf):
+            for j in range(nc):
+                allA_pix[:, i, j] = hp.ud_grade(allA[:, i, j], hp.npix2nside(npix))
+        # Return upgraded mixing matrix
+        return allA_pix
+    else:
+        # Return original mixing matrix
+        return allA
+def get_mixing_operator_verying_beta(nc, nside, A):
+
+    npix = 12*nside**2
+    
+    D = BlockDiagonalOperator([DenseBlockDiagonalOperator(A, broadcast='rightward', shapein=(npix, nc)),
+                           DenseBlockDiagonalOperator(A, broadcast='rightward', shapein=(npix, nc)),
+                           DenseBlockDiagonalOperator(A, broadcast='rightward', shapein=(npix, nc))], new_axisin=0, new_axisout=2)
+    return D
+def get_mixingmatrix(beta, nus, comp, active=False):
+    A = mm.MixingMatrix(*comp)
+    if active:
+        i = A.components.index('COLine')
+        comp[i] = c.COLine(nu=comp[i].nu, active=True)
+        A = mm.MixingMatrix(*comp)
+        A_ev = A.evaluator(nus)
+        if beta.shape[0] == 0:
+            A_ev = A_ev()
+        else:
+            A_ev = A_ev(beta)
+            for ii in range(len(comp)):
+                #print('ii : ', ii)
+                if ii == i:
+                    pass
+                else:
+                    #print('to zero', ii)
+                    A_ev[0, ii] = 0
+            #print(i, A, A.shape)    
+    
+    
+    else:
+        A_ev = A.evaluator(nus)
+        if beta.shape[0] == 0:
+            A_ev = A_ev()
+        else:
+            A_ev = A_ev(beta)
+        try:
+            
+            i = A.components.index('COLine')
+            A_ev[0, i] = 0
+        except:
+            pass
+    return A_ev
+def get_mixing_operator(beta, nus, comp, nside, active=False):
+    
+    """
+    This function returns a mixing operator based on the input parameters: beta and nus.
+    The mixing operator is either a constant operator, or a varying operator depending on the input.
+    """
+
+    nc = len(comp)
+    if beta.shape[0] != 1 and beta.shape[0] != 2:
+        
+        nside_fit = hp.npix2nside(beta.shape[0])
+    else:
+        nside_fit = 0
+
+    # Check if the length of beta is equal to the number of channels minus 1
+    if nside_fit == 0: # Constant indice on the sky
+        #beta = np.mean(beta)
+
+        # Get the mixing matrix
+        A = get_mixingmatrix(beta, nus, comp, active)
+        
+        # Get the shape of the mixing matrix
+        _, nc = A.shape
+        
+        # Create a ReshapeOperator
+        R = ReshapeOperator(((1, 12*nside**2, 3)), ((12*nside**2, 3)))
+        
+        # Create a DenseOperator with the first row of A
+        D = DenseOperator(A[0], broadcast='rightward', shapein=(nc, 12*nside**2, 3), shapeout=(1, 12*nside**2, 3))
+
+    else: # Varying indice on the sky
+        
+        # Get all A matrices nc, nf, npix, beta, nus, comp
+        A = get_allA(nc, 1, 12*nside**2, beta, nus, comp)
+        
+        # Get the varying mixing operator
+        D = get_mixing_operator_verying_beta(nc, nside, A)
+
+    return D
+
+
 class QubicIntegratedComponentsMapMaking(QubicPolyAcquisition):
 
     def __init__(self, d, comp, Nsub):
@@ -84,7 +184,7 @@ class QubicIntegratedComponentsMapMaking(QubicPolyAcquisition):
 
         _, allnus, _, _, _, _ = qubic.compute_freq(self.d['filter_nu']/1e9, Nfreq=self.Nsub, relative_bandwidth=self.d['filter_relative_bandwidth'])
         
-        self.multiinstrument = instr.QubicMultibandInstrument(self.d, integration = 'Trapeze')
+        self.multiinstrument = instr.QubicMultibandInstrument(self.d)
         self.nside = self.scene.nside
         self.allnus = allnus
         self.comp = comp
@@ -284,7 +384,7 @@ class QubicIntegratedComponentsMapMaking(QubicPolyAcquisition):
             else:
                 C = IdentityOperator()
             
-            A = CMMTools.get_mixing_operator(beta, np.array([nu]), comp=self.comp, nside=self.nside, active=False)
+            A = get_mixing_operator(beta, np.array([nu]), comp=self.comp, nside=self.nside, active=False)
             
             list_op[inu] = list_op[inu] * C * R * A
 
@@ -301,7 +401,7 @@ class QubicIntegratedComponentsMapMaking(QubicPolyAcquisition):
                     C = HealpixConvolutionGaussianOperator(fwhm = myfwhmco)
             else:
                 C = IdentityOperator()
-            Aco = CMMTools.get_mixing_operator(beta, np.array([nu_co]), comp=self.comp, nside=self.nside, active=True)
+            Aco = get_mixing_operator(beta, np.array([nu_co]), comp=self.comp, nside=self.nside, active=True)
             Hco = Rflat * G * Hco * C * R * Aco
             H += Hco
 
@@ -316,11 +416,11 @@ class QubicIntegratedComponentsMapMaking(QubicPolyAcquisition):
         # If CO line
         if len(H.operands) == 2:
             for inu, nu in enumerate(self.allnus):
-                newA = CMMTools.get_mixing_operator(newbeta, np.array([nu]), comp=self.comp, nside=self.nside, active=False)
+                newA = get_mixing_operator(newbeta, np.array([nu]), comp=self.comp, nside=self.nside, active=False)
                 H.operands[0].operands[2].operands[inu].operands[-1] = newA
         else:
             for inu, nu in enumerate(self.allnus):
-                newA = CMMTools.get_mixing_operator(newbeta, np.array([nu]), comp=self.comp, nside=self.nside)
+                newA = get_mixing_operator(newbeta, np.array([nu]), comp=self.comp, nside=self.nside)
                 H.operands[2].operands[inu].operands[-1] = newA
 
         return H
@@ -412,7 +512,7 @@ class QubicFullBand(QubicPolyAcquisition):
             else:
                 C = IdentityOperator()
 
-            A = CMMTools.get_mixing_operator(beta, np.array([self.allnus[inu]]), comp=self.comp, nside=self.nside, active=False)
+            A = get_mixing_operator(beta, np.array([self.allnus[inu]]), comp=self.comp, nside=self.nside, active=False)
 
             P = HomothetyOperator(NF[inu]) * i.get_operator() * C * R * A
 
@@ -536,14 +636,14 @@ class QubicFullBand(QubicPolyAcquisition):
             k=0
             for ifp in range(self.number_FP):
                 for jnu in range(int(self.Nsub/2)):
-                    A = CMMTools.get_mixing_operator(newbeta, np.array([self.allnus[k]]), comp=self.comp, nside=self.nside, active=False)
+                    A = get_mixing_operator(newbeta, np.array([self.allnus[k]]), comp=self.comp, nside=self.nside, active=False)
                     op.operands[ifp].operands[jnu].operands[-1] = A
                     k+=1
 
         elif self.kind == 'Wide':
             k=0
             for jnu in range(self.Nsub):
-                A = CMMTools.get_mixing_operator(newbeta, np.array([self.allnus[k]]), comp=self.comp, nside=self.nside, active=False)
+                A = get_mixing_operator(newbeta, np.array([self.allnus[k]]), comp=self.comp, nside=self.nside, active=False)
                 op.operands[jnu].operands[-1] = A
                 k+=1
         return op
@@ -633,7 +733,7 @@ class QubicOtherIntegratedComponentsMapMaking:
         self.qubic_resolution = self.allresolution.copy()
 
 
-        pkl_file = open(CMB_FILE+'AllDataSet_Components_MapMaking.pkl', 'rb')
+        pkl_file = open(path+'AllDataSet_Components_MapMaking.pkl', 'rb')
         dataset = pickle.load(pkl_file)
         self.dataset = dataset
         self.bw = []
@@ -766,7 +866,7 @@ class QubicOtherIntegratedComponentsMapMaking:
         for inu, nu in enumerate(self.external_nus):
             allnus = np.linspace(nu-self.bw[inu]/2, nu+self.bw[inu]/2, self.nintegr)
             for jnu, nueff in enumerate(allnus):
-                A = CMMTools.get_mixing_operator(newbeta, np.array([nueff]), comp=self.comp, nside=self.nside)
+                A = get_mixing_operator(newbeta, np.array([nueff]), comp=self.comp, nside=self.nside)
                 if self.qubic.d['comm'] is None:
                     op.operands[inu+1].operands[2].operands[jnu].operands[-1] = A
                 else:
@@ -823,7 +923,7 @@ class OtherData:
 
     def __init__(self, nus, nside, comp):
 
-        pkl_file = open(CMB_FILE+'AllDataSet_Components_MapMaking.pkl', 'rb')
+        pkl_file = open(path+'AllDataSet_Components_MapMaking.pkl', 'rb')
         dataset = pickle.load(pkl_file)
         self.dataset = dataset
 
@@ -919,12 +1019,12 @@ class OtherData:
             C = HealpixConvolutionGaussianOperator(fwhm=fwhm)
             op = []
             for inu, nu in enumerate(allnus):
-                D = CMMTools.get_mixing_operator(beta, np.array([nu]), comp=self.comp, nside=self.nside, active=False)
+                D = get_mixing_operator(beta, np.array([nu]), comp=self.comp, nside=self.nside, active=False)
                 op.append(C * R * D)
 
             if i == 217:
                 if nu_co is not None:
-                    Dco = CMMTools.get_mixing_operator(beta, np.array([nu_co]), comp=self.comp, nside=self.nside, active=True)
+                    Dco = get_mixing_operator(beta, np.array([nu_co]), comp=self.comp, nside=self.nside, active=True)
                     op.append(C * R * Dco)
             if comm is not None:
                 Operator.append(R2tod(AdditionOperator(op)/nintegr))
