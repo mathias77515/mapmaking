@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=both_001
+#SBATCH --job-name=both_101
 
 # we ask for n MPI tasks with N cores each on c nodes
 
@@ -8,8 +8,8 @@
 #SBATCH --nodes=1                # c
 #SBATCH --ntasks-per-node=6      # n
 #SBATCH --cpus-per-task=5        # N
-#SBATCH --mem=20G
-#SBATCH --time=0-00:30:00
+#SBATCH --mem=40G
+#SBATCH --time=0-00:40:00
 #SBATCH --output=mulitple_jobs_%j.log
 
 export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK}
