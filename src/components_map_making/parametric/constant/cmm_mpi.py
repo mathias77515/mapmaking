@@ -43,6 +43,9 @@ path = '/home/regnier/work/regnier/MapMaking/ComponentMapMaking/forecast_wideban
 
 seed = int(sys.argv[1])
 iteration = int(sys.argv[2])
+ndet = int(sys.argv[3])
+npho150 = int(sys.argv[4])
+npho220 = int(sys.argv[5])
 
 ### Reading and loading configuration file
 def load_config(config_file):
@@ -117,9 +120,6 @@ nu_ave, delta_nu_over_nu = get_ultrawideband_config()
 
 external = load_config('config.ini')
 
-if nside_fit != 0:
-    raise TypeError('You must have to put nside_fit = 0 (constant spectral index)')
-
 if rank == 0:
     print('************ Configuration of the simulation ************\n')
     print('Instrument      :')
@@ -134,8 +134,7 @@ if rank == 0:
 
 save_each_ite = f'{type}_ndet{ndet}_pho150{npho150}_pho220{npho220}_seed{seed}_iteration{iteration}'
 if rank == 0:
-    pass
-    #os.makedirs(save_each_ite)
+    os.makedirs(save_each_ite)
 path_to_save = str(save_each_ite)
 
 #########################################################################################################
@@ -170,7 +169,6 @@ center = qubic.equ2gal(d['RA_center'], d['DEC_center'])
 #########################################################################################################
 
 # QUBIC Acquisition
-
 myqubic = Acq.QubicFullBand(d, Nsub=nsub, comp=comp, kind=type)
 
 ### See if we want to fit CO line
@@ -190,9 +188,9 @@ others = Acq.OtherData(external, nside, comp=comp)
 # Input beta
 beta=np.array([1.54])
 
-array_of_operators = myqubic._get_array_operators(beta, convolution=False, list_fwhm=None)
-array_of_operators150 = array_of_operators[:nsub]
-array_of_operators220 = array_of_operators[nsub:2*nsub]
+#array_of_operators = myqubic._get_array_operators(beta, convolution=False, list_fwhm=None)
+#array_of_operators150 = array_of_operators[:nsub]
+#array_of_operators220 = array_of_operators[nsub:2*nsub]
 
 #########################################################################################################
 ############################################## Components ###############################################
@@ -229,6 +227,10 @@ print(f'FWHM for Nsub : {myfwhm}')
 
 # Get reconstruction operator
 H = allexp.get_operator(beta, convolution)
+array_of_operators = myqubic.operator
+array_of_operators150 = myqubic.operator[:nsub]
+array_of_operators220 = myqubic.operator[nsub:2*nsub]
+
 Hrecon = allexp.get_operator(beta, convolution, list_fwhm=myfwhm)
 
 # Get simulated data
@@ -297,9 +299,9 @@ for i in range(len(comp)):
 
     if comp_name[i] == 'CMB':
         np.random.seed(42)
-        comp_for_pcg[i] = Ctrue(components[i]) * (np.random.randn(12*nside**2, 3)*1)
+        comp_for_pcg[i] = (Ctrue(components[i]) * set_cmb_x0_to_0) + (np.random.randn(12*nside**2, 3)*sig_x0)
     elif comp_name[i] == 'DUST':
-        comp_for_pcg[i] = Ctrue(components[i])
+        comp_for_pcg[i] = Ctrue(components[i]) + (np.random.randn(12*nside**2, 3)*sig_x0)
     elif comp_name[i] == 'SYNCHROTRON':
         comp_for_pcg[i] = Ctrue(components[i])
     elif comp_name[i] == 'CO':
@@ -311,8 +313,6 @@ for i in range(len(comp)):
 ############################################## Main Loop ################################################
 #########################################################################################################
 
-
-kmax=3000
 k=0
 g_i = np.ones((myqubic.number_FP, myqubic.Ndets))
 beta_i = beta.copy()
@@ -451,9 +451,9 @@ if save_each_ite is not None:
                 
     dict_i = {'maps':components, 'initial':comp_for_pcg, 'beta':beta, 'allfwhm':myqubic.allfwhm, 'coverage':coverage, 'convergence':1, 'execution_time':0}
 
-    #output = open(path_to_save+'/Iter0_maps_beta_gain_rms_maps.pkl', 'wb')
-    #pickle.dump(dict_i, output)
-    #output.close()
+    output = open(path_to_save+'/Iter0_maps_beta_gain_rms_maps.pkl', 'wb')
+    pickle.dump(dict_i, output)
+    output.close()
 
 del H
 gc.collect()
@@ -492,10 +492,22 @@ while k < kmax :
                 C = HealpixConvolutionGaussianOperator(fwhm=myqubic.allfwhm[-1])
             else:
                 C = HealpixConvolutionGaussianOperator(fwhm=0)
-            hp.gnomview(components[0, :, 1], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
-            hp.gnomview(solution['x'][0, :, 1], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
-            hp.gnomview(solution['x'][0, :, 1] - components[0, :, 1], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 3))
-            plt.savefig(f'{type}_Iter{k+1}.png')
+            hp.gnomview(C_reconv(C(components[0, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
+            hp.gnomview(C_reconv(solution['x'][0, :, 1]), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
+            hp.gnomview(C_reconv(solution['x'][0, :, 1]) - C_reconv(C(components[0, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 3))
+            plt.savefig(f'comp0_{type}_seed{seed}_iteration{iteration}_Iter{k+1}.png')
+            plt.close()
+
+            plt.figure(figsize=(15, 5))
+            C_reconv = HealpixConvolutionGaussianOperator(fwhm=np.sqrt(myqubic.allfwhm[0]**2 - myqubic.allfwhm[-1]**2))
+            if convolution:
+                C = HealpixConvolutionGaussianOperator(fwhm=myqubic.allfwhm[-1])
+            else:
+                C = HealpixConvolutionGaussianOperator(fwhm=0)
+            hp.gnomview(C_reconv(C(components[1, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
+            hp.gnomview(C_reconv(solution['x'][1, :, 1]), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
+            hp.gnomview(C_reconv(solution['x'][1, :, 1]) - C_reconv(C(components[1, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 3))
+            plt.savefig(f'comp1_{type}_seed{seed}_iteration{iteration}_Iter{k+1}.png')
             plt.close()
     
     ### Compute spectra
@@ -549,18 +561,24 @@ while k < kmax :
         chi2 = partial(chi2_tot, solution=components_for_beta)
     
     ### Doing minimization
-    beta_i = minimize(chi2, x0=np.array([1.5]), method=str(method), tol=1e-4).x
+    beta_i = minimize(chi2, x0=np.array([1.5]), method=str(method), tol=tol_beta).x
     
     print(beta_i)
     
     ### Saving components, beta, gain, convergence, etc.. for each iteration
     if rank == 0:
         if save_each_ite is not None:
+
+            if save_last_ite:
+                if k != 0:
+                    os.remove(path_to_save+'/Iter{}_maps_beta_gain_rms_maps.pkl'.format(k))
+
+
             dict_i = {'maps':components_i, 'beta':beta_i, 'allfwhm':myqubic.allfwhm, 'coverage':coverage, 'convergence':solution['error']}
     
-            #output = open(path_to_save+'/Iter{}_maps_beta_gain_rms_maps.pkl'.format(k+1), 'wb')
-            #pickle.dump(dict_i, output)
-            #output.close()
+            output = open(path_to_save+'/Iter{}_maps_beta_gain_rms_maps.pkl'.format(k+1), 'wb')
+            pickle.dump(dict_i, output)
+            output.close()
 
 
     k+=1
