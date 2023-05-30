@@ -18,11 +18,12 @@ import matplotlib.pyplot as plt
 
 # FG-Buster packages
 import component_model as c
+import mixing_matrix as mm
 
 # General packages
 import numpy as np
 import warnings
-#import solver4mpi
+import solver4mpi
 
 from scipy.optimize import minimize
 from functools import partial
@@ -39,6 +40,8 @@ from cg import pcg
 comm = MPI.COMM_WORLD
 rank = comm.Get_rank()
 size = comm.Get_size()
+
+print(f'You requested for {size} processes, this one is the number {rank}')
 
 warnings.filterwarnings("ignore")
 path = '/home/regnier/work/regnier/MapMaking/ComponentMapMaking/forecast_wideband'
@@ -148,18 +151,32 @@ path_to_save = str(save_each_ite)
 
 comp = []
 comp_name = []
+nb_param = 0
 if cmb :
     comp.append(c.CMB())
     comp_name.append('CMB')
 if dust[0].lower() == 'true':
     comp.append(c.Dust(nu0=nu0_d, temp=temp))
     comp_name.append('DUST')
+    nb_param += 1
 if synchrotron[0].lower() == 'true':
     comp.append(c.Synchrotron(nu0=nu0_s, beta_pl=-3))                     # We remove a template of synchrotron emission -> fixing the spectral index
     comp_name.append('SYNCHROTRON')
+    nb_param += 1
 if coline[0].lower() == 'true':
     comp.append(c.COLine(nu=float(coline[2])/1e9, active=False))
     comp_name.append('CO')
+
+A = mm.MixingMatrix(*comp)
+
+if cmb :
+    i_cmb = A.components.index('CMB')
+if dust[0].lower() == 'true':
+    i_d = A.components.index('Dust')
+if synchrotron[0].lower() == 'true':
+    i_sync = A.components.index('Synchrotron')
+if coline[0].lower() == 'true':
+    i_co = A.components.index('CO')
 
 ### Dictionary for reconstruction
 d = get_dict({'npointings':npointings, 'nf_recon':1, 'nf_sub':nsub, 'nside':nside, 'MultiBand':True, 'period':1,
@@ -196,7 +213,13 @@ allexp = Acq.QubicOtherIntegratedComponentsMapMaking(myqubic, external, comp=com
 others = Acq.OtherData(external, nside, comp=comp)
 
 # Input beta
-beta=np.ones((12*nside_fit**2, 1))*1.54#np.array([1.54])
+beta=np.ones((12*nside_fit**2, nb_param))
+
+if len(comp) == 2:
+    beta[:, 0] *= 1.54
+else:
+    beta[:, 0] *= 1.54
+    beta[:, 1] *= -3
 
 #########################################################################################################
 ############################################## Components ###############################################
@@ -207,13 +230,15 @@ if cmb:
     dcomp['cmb'] = seed
 if dust[0].lower() == 'true':
     dcomp['dust'] = str(dust[1])
+    beta_d_mean = 1.54
 if synchrotron[0].lower() == 'true':
     dcomp['synchrotron'] = str(synchrotron[1])
+    beta_s_mean = -3
 if coline[0].lower() == 'true':
     dcomp['coline'] = str(coline[1])
 
 components = myqubic.get_PySM_maps(dcomp).T
-
+print(dcomp)
 # invN
 invN = allexp.get_invntt_operator()
 M = Acq.get_preconditioner(np.ones(12*allexp.nside**2))
@@ -301,7 +326,7 @@ else:
 target = np.sqrt(myqubic.allfwhm[0]**2 - myqubic.allfwhm[-1]**2)
 C_target = HealpixConvolutionGaussianOperator(fwhm=target)
 comp_for_pcg = components.copy()
-print(components.shape)
+
 for i in range(len(comp)):
 
     if comp_name[i] == 'CMB':
@@ -324,7 +349,17 @@ for i in range(len(comp)):
 kmax=3000
 k=0
 g_i = np.ones((myqubic.number_FP, myqubic.Ndets))
-beta_i = np.random.random((12*nside_fit**2, 1))*0.4 + 1.54
+beta_i = np.random.random((12*nside_fit**2, nb_param))
+if len(comp) == 2:
+    beta[:, 0] *= 0.0001
+    beta[:, 0] += beta_d_mean
+else:
+    beta[:, 0] *= 0.0001
+    beta[:, 0] += beta_d_mean
+    beta[:, 1] *= -3
+
+#beta_i[:, 0] = 1.54
+#beta_i[:, 1] = -3
 components_i = comp_for_pcg.copy()
 
 
@@ -443,6 +478,7 @@ def chi2_tot(x, patch_id, allbeta, solution):
         chi^2 = chi^2_150 + chi^2_220 + chi^2_external
 
     """
+    print(allbeta.shape, x)
     allbeta[patch_id] = x
     xi2_external = chi2_external(x, patch_id, allbeta, solution)
     if type == 'Two':
@@ -461,7 +497,7 @@ def make_estimation_beta(chi2, index, nb_process, process_id):
 
     for ii, i in enumerate(index_per_process):
         print(f'Doing beta number {i} with process {process_id}')
-        beta[ii] = minimize(chi2, np.ones(1)*1.54, args=(i), tol=tol_beta, method='L-BFGS-B').x
+        beta[ii] = minimize(chi2, np.ones(nb_param)*1.54, args=(i), tol=tol_beta, method='L-BFGS-B').x
 
     return beta, index_per_process
 
@@ -504,29 +540,19 @@ while k < kmax :
     comm.Barrier()
     if rank == 0:
         if doplot:
-            plt.figure(figsize=(15, 5))
-            C_reconv = HealpixConvolutionGaussianOperator(fwhm=np.sqrt(myqubic.allfwhm[0]**2 - myqubic.allfwhm[-1]**2))
-            if convolution:
-                C = HealpixConvolutionGaussianOperator(fwhm=myqubic.allfwhm[-1])
-            else:
-                C = HealpixConvolutionGaussianOperator(fwhm=0)
-            hp.gnomview(components[1, :, 0], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
-            hp.gnomview(solution['x'][1, :, 0], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
-            hp.gnomview(solution['x'][1, :, 0] - components[1, :, 0], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 3))
-            plt.savefig(f'0_{type}_Iter{k+1}.png')
-            plt.close()
 
-            plt.figure(figsize=(15, 5))
-            C_reconv = HealpixConvolutionGaussianOperator(fwhm=np.sqrt(myqubic.allfwhm[0]**2 - myqubic.allfwhm[-1]**2))
-            if convolution:
-                C = HealpixConvolutionGaussianOperator(fwhm=myqubic.allfwhm[-1])
-            else:
-                C = HealpixConvolutionGaussianOperator(fwhm=0)
-            hp.gnomview(components[1, :, 1], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
-            hp.gnomview(solution['x'][1, :, 1], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
-            hp.gnomview(solution['x'][1, :, 1] - components[1, :, 1], rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 3))
-            plt.savefig(f'1_{type}_Iter{k+1}.png')
-            plt.close()
+            for i in range(len(comp)):
+                plt.figure(figsize=(15, 5))
+                C_reconv = HealpixConvolutionGaussianOperator(fwhm=np.sqrt(myqubic.allfwhm[0]**2 - myqubic.allfwhm[-1]**2))
+                if convolution:
+                    C = HealpixConvolutionGaussianOperator(fwhm=myqubic.allfwhm[-1])
+                else:
+                    C = HealpixConvolutionGaussianOperator(fwhm=0)
+                hp.gnomview(components[1, :, i], rot=center, reso=25, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
+                hp.gnomview(solution['x'][1, :, i], rot=center, reso=25, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
+                hp.gnomview(solution['x'][1, :, i] - components[1, :, i], rot=center, reso=25, cmap='jet', min=-6, max=6, sub=(1, 3, 3))
+                plt.savefig(f'{i}_{type}_Iter{k+1}.png')
+                plt.close()
     
     ### Compute spectra
     components_i = solution['x'].copy()
@@ -581,18 +607,31 @@ while k < kmax :
 
     ### Doing minimization
     comm.Barrier()
-    beta_i_ranki, index_per_process = make_estimation_beta(chi2, index_seenpix, size, rank)
-    comm.Barrier()
 
-    beta_i_gathered = comm.allgather(beta_i_ranki)
-    index_per_process_gathered = comm.allgather(index_per_process)
+    if nb_param == 1:
+        if dust[0].lower() == 'true':
+            x0 = np.array([beta_d_mean])
+        elif synchrotron[0].lower() == 'true':
+            x0 = np.array([beta_s_mean])
+    elif nb_param > 1:
+        x0 = np.array([beta_d_mean, beta_s_mean])
+
+    beta_i_index = solver4mpi.minimizer_multiprocess.WrapperMPI(comm, chi2, x0=x0, verbose=True, method=method, 
+                                                                                                        tol=tol_beta).perform(index_seenpix)
+    print(beta_i_index)
+    stop
+    #beta_i_ranki, index_per_process = make_estimation_beta(chi2, index_seenpix, size, rank)
+    #comm.Barrier()
+
+    #beta_i_gathered = comm.allgather(beta_i_ranki)
+    #index_per_process_gathered = comm.allgather(index_per_process)
     
-    beta_i_combined = np.concatenate(beta_i_gathered)
-    index_per_process_combined = np.concatenate(index_per_process_gathered)
+    #beta_i_combined = np.concatenate(beta_i_gathered)
+    #index_per_process_combined = np.concatenate(index_per_process_gathered)
     
-    beta_i[index_per_process_combined, 0] = beta_i_combined.copy()
-    if rank == 0:
-        print(beta_i[index_per_process_combined, 0])
+    #beta_i[index_per_process_combined, 0] = beta_i_combined.copy()
+    #if rank == 0:
+    #    print(beta_i[index_per_process_combined, 0])
 
     
     
