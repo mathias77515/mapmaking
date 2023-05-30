@@ -495,27 +495,29 @@ class QubicFullBand(QubicPolyAcquisition):
 
         '''
 
-        operator = []
-        R = ReshapeOperator((1, 12*self.nside**2, 3), (12*self.nside**2, 3))
+        self.operator = []
+        if beta.shape[0] > 2:
+            R = ReshapeOperator((12*self.nside**2, 1, 3), (12*self.nside**2, 3))
+        else:
+            R = ReshapeOperator((1, 12*self.nside**2, 3), (12*self.nside**2, 3))
         NF = np.ones(len(self.allnus))
         for inu, i in enumerate(self.subacqs):
             if convolution:
                 if list_fwhm is not None:
-                    C = HealpixConvolutionGaussianOperator(fwhm = list_fwhm[inu])
+                    C = HealpixConvolutionGaussianOperator(fwhm = list_fwhm[inu], lmax=2*self.nside)
                 else:
-                    C = HealpixConvolutionGaussianOperator(fwhm = self.allfwhm[inu])
+                    C = HealpixConvolutionGaussianOperator(fwhm = self.allfwhm[inu], lmax=2*self.nside)
             else:
                 C = IdentityOperator()
 
             A = get_mixing_operator(beta, np.array([self.allnus[inu]]), comp=self.comp, nside=self.nside, active=False)
-
             P = HomothetyOperator(NF[inu]) * i.get_operator() * C * R * A
 
-            operator.append(P)
+            self.operator.append(P)
 
-        self.Ndets, self.Nsamples = operator[0].shapeout
+        self.Ndets, self.Nsamples = self.operator[0].shapeout
 
-        return operator
+        return self.operator
     
     def get_operator(self, beta, convolution, list_fwhm=None):
 
