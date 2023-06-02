@@ -3,7 +3,7 @@ import qubic
 import sys
 import os
 path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
-sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))))
+sys.path.insert(1,os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))))
 
 import component_acquisition as Acq
 import pickle
