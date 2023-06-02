@@ -2,7 +2,7 @@
 import qubic
 import sys
 import os
-path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
+#path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
 sys.path.insert(1,os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))))
 
 import component_acquisition as Acq
@@ -39,7 +39,7 @@ rank = comm.Get_rank()
 size = comm.Get_size()
 
 warnings.filterwarnings("ignore")
-path = '/home/regnier/work/regnier/MapMaking/ComponentMapMaking/forecast_wideband'
+#path = '/home/regnier/work/regnier/MapMaking/ComponentMapMaking/forecast_wideband'
 
 seed = int(sys.argv[1])
 iteration = int(sys.argv[2])
