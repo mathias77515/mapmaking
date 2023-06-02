@@ -5,7 +5,7 @@ import os
 
 os.environ['NUMBA_DISABLE_JIT'] = '1'
 
-path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
+#path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
 sys.path.append(os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))))
 
 import component_acquisition as Acq
@@ -44,7 +44,7 @@ size = comm.Get_size()
 print(f'You requested for {size} processes, this one is the number {rank}')
 
 warnings.filterwarnings("ignore")
-path = '/home/regnier/work/regnier/MapMaking/ComponentMapMaking/forecast_wideband'
+#path = '/home/regnier/work/regnier/MapMaking/ComponentMapMaking/forecast_wideband'
 
 seed = int(sys.argv[1])
 iteration = int(sys.argv[2])
