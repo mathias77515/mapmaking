@@ -143,25 +143,28 @@ path_to_save = str(save_each_ite)
 
 comp = []
 comp_name = []
-if cmb :
+if cmb:
     comp.append(c.CMB())
     comp_name.append('CMB')
 if dust[0].lower() == 'true':
     comp.append(c.Dust(nu0=nu0_d, temp=temp))
     comp_name.append('DUST')
 if synchrotron[0].lower() == 'true':
-    comp.append(c.Synchrotron(nu0=nu0_s, beta_pl=-3))                     # We remove a template of synchrotron emission -> fixing the spectral index
+    comp.append(c.Synchrotron(nu0=nu0_s))                     # We remove a template of synchrotron emission -> fixing the spectral index
     comp_name.append('SYNCHROTRON')
 if coline[0].lower() == 'true':
     comp.append(c.COLine(nu=float(coline[2])/1e9, active=False))
     comp_name.append('CO')
 
+if size == 1:
+    comm = None
+
 ### Dictionary for reconstruction
 d = get_dict({'npointings':npointings, 'nf_recon':1, 'nf_sub':nsub, 'nside':nside, 'MultiBand':True, 'period':1,
               'filter_nu':nu_ave*1e9, 'noiseless':False, 'comm':comm, 'nprocs_sampling':1, 'nprocs_instrument':size,
               'photon_noise':True, 'nhwp_angles':3, 'effective_duration':3, 'filter_relative_bandwidth':delta_nu_over_nu, 
-              'type_instrument':'wide', 'TemperatureAtmosphere150':None, 'TemperatureAtmosphere220':None,
-              'EmissivityAtmosphere150':None, 'EmissivityAtmosphere220':None})
+              'type_instrument':'wide', 'TemperatureAtmosphere150':None, 'TemperatureAtmosphere220':None, 'RA_center':100, 'DEC_center':-157,
+              'EmissivityAtmosphere150':None, 'EmissivityAtmosphere220':None, 'synthbeam_kmax':synthbeam_kmax})
 
 center = qubic.equ2gal(d['RA_center'], d['DEC_center'])
 #########################################################################################################
@@ -169,7 +172,7 @@ center = qubic.equ2gal(d['RA_center'], d['DEC_center'])
 #########################################################################################################
 
 # QUBIC Acquisition
-myqubic = Acq.QubicFullBand(d, Nsub=nsub, comp=comp, kind=type)
+myqubic = Acq.QubicFullBandComponentsMapMakingParametric(d, Nsub=nsub, comp=comp, kind=type)
 
 ### See if we want to fit CO line
 isco = coline[0].lower() == 'true'
@@ -180,23 +183,26 @@ else:
 
 coverage = myqubic.get_coverage()
 pixok = coverage/coverage.max() > thr
+pixok1 = coverage/coverage.max() > thr_cut_planck
 
 # Add external data
-allexp = Acq.QubicOtherIntegratedComponentsMapMaking(myqubic, external, comp=comp, nintegr=nintegr)
-others = Acq.OtherData(external, nside, comp=comp)
+allexp = Acq.QubicOtherIntegratedComponentsMapMakingParametric(myqubic, external, comp=comp, nintegr=nintegr)
+others = Acq.OtherDataParametric(external, nside, comp=comp, nintegr=nintegr)
 
 # Input beta
-beta=np.array([1.54])
+beta=np.array([])
+if dust[0].lower() == 'true':
+    beta = np.append(beta, float(dust[2]))
 
-#array_of_operators = myqubic._get_array_operators(beta, convolution=False, list_fwhm=None)
-#array_of_operators150 = array_of_operators[:nsub]
-#array_of_operators220 = array_of_operators[nsub:2*nsub]
+if synchrotron[0].lower() == 'true':
+    beta = np.append(beta, float(synchrotron[2]))
 
 #########################################################################################################
 ############################################## Components ###############################################
 #########################################################################################################
 
 dcomp = {}
+nu_co = None
 if cmb:
     dcomp['cmb'] = seed
 if dust[0].lower() == 'true':
@@ -205,14 +211,19 @@ if synchrotron[0].lower() == 'true':
     dcomp['synchrotron'] = str(synchrotron[1])
 if coline[0].lower() == 'true':
     dcomp['coline'] = str(coline[1])
+    nu_co = 230.538e9
 
 components = myqubic.get_PySM_maps(dcomp)
+for i in range(components.shape[0]):
+    components[i] = HealpixConvolutionGaussianOperator(fwhm=fake_convolution)(components[i])
 
 # invN
-invN = allexp.get_invntt_operator()
+mask = np.ones(12*nside**2)*kappa
+mask[~pixok1[0]] = 1
+invN = allexp.get_invntt_operator(mask=mask)
+#invN.operands[0].operands[1] /= kappa
+print(invN.operands)
 M = Acq.get_preconditioner(np.ones(12*allexp.nside**2))
-
-
 
 #########################################################################################################
 ############################################## Reconstruction ###########################################
@@ -226,15 +237,32 @@ else:
 print(f'FWHM for Nsub : {myfwhm}')
 
 # Get reconstruction operator
-H = allexp.get_operator(beta, convolution)
+H = allexp.get_operator(beta, convolution, co=nu_co)
+
+#if rank == 0:
+#    print(H.operands)
+
+#newH = allexp.update_A(H, np.array([0.2]))
+#if rank == 0:
+#    print(newH.operands)
+#stop
 array_of_operators = myqubic.operator
+
 array_of_operators150 = myqubic.operator[:nsub]
 array_of_operators220 = myqubic.operator[nsub:2*nsub]
 
-Hrecon = allexp.get_operator(beta, convolution, list_fwhm=myfwhm)
+Hrecon = allexp.get_operator(beta, convolution, list_fwhm=myfwhm, co=nu_co)
 
 # Get simulated data
-tod = H(components)
+
+tod_q = H.operands[0](components)
+comp_for_planck = components.copy()
+
+#comp_for_planck[:, pixok1[0], :] = 0
+tod_e = H.operands[1](comp_for_planck)
+tod = np.r_[tod_q, tod_e]
+
+#tod = H(components)
 
 
 #########################################################################################################
@@ -266,6 +294,7 @@ if type == 'Wide':
 elif type == 'Two':
     nq = QubicDualBandNoise(d, npointings).total_noise(int(ndet), int(npho150), int(npho220)).ravel()
 
+
 seed_pl = 42
 n = others.get_noise(seed=seed_pl) * level_noise_planck
 n = np.r_[nq, n]
@@ -296,16 +325,17 @@ C_target = HealpixConvolutionGaussianOperator(fwhm=target)
 comp_for_pcg = components.copy()
 
 for i in range(len(comp)):
-
     if comp_name[i] == 'CMB':
-        np.random.seed(42)
-        comp_for_pcg[i] = (Ctrue(components[i]) * set_cmb_x0_to_0) + (np.random.randn(12*nside**2, 3)*sig_x0)
+        #comp_for_pcg[i] = 0#np.random.random((12*nside**2, 3))*2
+        comp_for_pcg[i] = Ctrue(components[i]) * set_cmb_x0_to_0 + np.random.normal(0, sig_x0, components[i].shape)
     elif comp_name[i] == 'DUST':
-        comp_for_pcg[i] = Ctrue(components[i]) + (np.random.randn(12*nside**2, 3)*sig_x0)
+        C = HealpixConvolutionGaussianOperator(fwhm=np.deg2rad(0))
+        comp_for_pcg[i] = Ctrue(components[i])# + Ctrue(components[1])#C(components[i])
     elif comp_name[i] == 'SYNCHROTRON':
-        comp_for_pcg[i] = Ctrue(components[i])
+        C = HealpixConvolutionGaussianOperator(fwhm=np.deg2rad(2))#myqubic.allfwhm[-1])
+        comp_for_pcg[i] = C(components[i])
     elif comp_name[i] == 'CO':
-        comp_for_pcg[i] = Ctrue(components[i])
+        comp_for_pcg[i] = C(components[i])
     else:
         raise TypeError(f'{comp_name[i]} not recognize')
 
@@ -317,7 +347,6 @@ k=0
 g_i = np.ones((myqubic.number_FP, myqubic.Ndets))
 beta_i = beta.copy()
 components_i = comp_for_pcg.copy()
-
 
 def chi2_wide(x, solution):
 
@@ -334,8 +363,8 @@ def chi2_wide(x, solution):
     #G_w = DiagonalOperator(gw, broadcast='rightward')
 
     k=0
-    for ii, i in enumerate(array_of_operators):
-    
+    for ii, i in enumerate(array_of_operators[:2*nsub]):
+        
         A = Acq.get_mixing_operator(x, nus=np.array([myqubic.allnus[k]]), comp=comp, nside=nside, active=False)
         Hi = i.copy()
         Hi.operands[-1] = A
@@ -343,11 +372,20 @@ def chi2_wide(x, solution):
         tod_s_i += Hi(solution[ii]).ravel()
         k+=1
 
-    
-    tod_150_norm = tod_w
-    tod_s_i_norm = tod_s_i
+    if nu_co is not None:
+        A = Acq.get_mixing_operator(x, nus=np.array([nu_co]), comp=comp, nside=nside, active=True)
+        Hi = array_of_operators[-1].copy()
+        Hi.operands[-1] = A
 
-    return np.sum((tod_150_norm - tod_s_i_norm)**2)
+        tod_s_i += Hi(solution[-1]).ravel()
+
+    
+
+    
+    tod_150_norm = tod_w#/tod_w.max()
+    tod_s_i_norm = tod_s_i#/tod_s_i.max()
+
+    return np.sum((tod_150_norm - tod_s_i_norm)**2 / np.std(tod_s_i_norm)**2)
 def chi2_150(x, solution):
 
     """
@@ -365,6 +403,7 @@ def chi2_150(x, solution):
     #print('len 150 = ', len(array_of_operators150))
     for ii, i in enumerate(array_of_operators150):
         #print(ii)
+        #print(myqubic.allnus[k])
         A = Acq.get_mixing_operator(x, nus=np.array([myqubic.allnus[k]]), comp=comp, nside=nside, active=False)
         Hi = i.copy()
         Hi.operands[-1] = A
@@ -373,8 +412,8 @@ def chi2_150(x, solution):
         k+=1
 
     
-    tod_150_norm = tod_150#/tod_150.max()#/np.std(tod_150)
-    tod_s_i_norm = tod_s_i#/tod_s_i.max()#/np.std(tod_s_i)
+    tod_150_norm = tod_150/tod_150.max()#/np.std(tod_150)
+    tod_s_i_norm = tod_s_i/tod_s_i.max()#/np.std(tod_s_i)
 
     return np.sum((tod_150_norm - tod_s_i_norm)**2)
 def chi2_220(x, solution):
@@ -401,8 +440,8 @@ def chi2_220(x, solution):
         k+=1
         
 
-    tod_220_norm = tod_220#/tod_220.max()
-    tod_s_ii_norm = tod_s_ii#/tod_s_ii.max()
+    tod_220_norm = tod_220/tod_220.max()
+    tod_s_ii_norm = tod_s_ii/tod_s_ii.max()
     return np.sum((tod_220_norm - tod_s_ii_norm)**2)
 def chi2_external(x, solution):
 
@@ -416,15 +455,15 @@ def chi2_external(x, solution):
 
     tod_s_i = tod_external.copy() * 0
 
-    Hexternal = Acq.OtherData(external, nside, comp).get_operator(nintegr=nintegr, beta=x, convolution=False, myfwhm=None, nu_co=nu_co)
+    Hexternal = Acq.OtherDataParametric(external, nside, comp, nintegr=nintegr).get_operator(beta=x, convolution=False, myfwhm=None, nu_co=nu_co)
 
     tod_s_i = Hexternal(solution[-1])
 
     
     tod_external_norm = tod_external#CMM.normalize_tod(tod_external, external, 12*nside**2)
     tod_s_i_norm = tod_s_i#CMM.normalize_tod(tod_s_i, external, 12*nside**2)
-
-    return np.sum((tod_external_norm - tod_s_i_norm)**2)
+    diff = tod_external_norm - tod_s_i_norm
+    return np.sum((diff)**2 / np.std(tod_s_i_norm)**2)
 def chi2_tot(x, solution):
 
     """
@@ -439,9 +478,11 @@ def chi2_tot(x, solution):
     if type == 'Two':
         xi2_150 = chi2_150(x, solution)
         xi2_220 = chi2_220(x, solution)
+        #print(xi2_150, xi2_220)
         return xi2_150 + xi2_220 + xi2_external
     elif type == 'Wide':
         xi2_w = chi2_wide(x, solution)
+        #print(xi2_w, xi2_external)
         return xi2_w + xi2_external
     
     #print(x, xi2_150, xi2_220, xi2_external)
@@ -449,8 +490,8 @@ def chi2_tot(x, solution):
 
 if save_each_ite is not None:
                 
-    dict_i = {'maps':components, 'initial':comp_for_pcg, 'beta':beta, 'allfwhm':myqubic.allfwhm, 'coverage':coverage, 'convergence':1, 'execution_time':0}
-
+    dict_i = {'maps':components, 'initial':comp_for_pcg, 'beta':beta, 'allfwhm':myqubic.allfwhm, 
+              'coverage':coverage, 'convergence':1, 'execution_time':0, 'pixok':pixok1}
     output = open(path_to_save+'/Iter0_maps_beta_gain_rms_maps.pkl', 'wb')
     pickle.dump(dict_i, output)
     output.close()
@@ -465,7 +506,7 @@ while k < kmax :
     #####################################
 
     H_i = allexp.update_A(Hrecon, beta_i)
-
+    
     if type == 'Two':
         Gp150 = DiagonalOperator(1/g_i[0], broadcast='rightward', shapein=(myqubic.Ndets, myqubic.Nsamples))
         Gp220 = DiagonalOperator(1/g_i[1], broadcast='rightward', shapein=(myqubic.Ndets, myqubic.Nsamples))
@@ -478,37 +519,36 @@ while k < kmax :
     A = H_i.T * invN * H_i
     b = H_i.T * invN * tod
     
-    comm.Barrier()
+    if size != 1:
+        comm.Barrier()
 
     ### PCG
     solution = pcg(A, b, M=M, tol=float(tol), x0=components_i, maxiter=int(maxite), disp=True)
     
-    comm.Barrier()
+    if size != 1:
+        comm.Barrier()
+
     if rank == 0:
         if doplot:
-            plt.figure(figsize=(15, 5))
-            C_reconv = HealpixConvolutionGaussianOperator(fwhm=np.sqrt(myqubic.allfwhm[0]**2 - myqubic.allfwhm[-1]**2))
-            if convolution:
-                C = HealpixConvolutionGaussianOperator(fwhm=myqubic.allfwhm[-1])
-            else:
-                C = HealpixConvolutionGaussianOperator(fwhm=0)
-            hp.gnomview(C_reconv(C(components[0, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
-            hp.gnomview(C_reconv(solution['x'][0, :, 1]), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
-            hp.gnomview(C_reconv(solution['x'][0, :, 1]) - C_reconv(C(components[0, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 3))
-            plt.savefig(f'comp0_{type}_seed{seed}_iteration{iteration}_Iter{k+1}.png')
-            plt.close()
+            if k == 0:
+                os.makedirs('images')
 
-            plt.figure(figsize=(15, 5))
-            C_reconv = HealpixConvolutionGaussianOperator(fwhm=np.sqrt(myqubic.allfwhm[0]**2 - myqubic.allfwhm[-1]**2))
-            if convolution:
-                C = HealpixConvolutionGaussianOperator(fwhm=myqubic.allfwhm[-1])
-            else:
-                C = HealpixConvolutionGaussianOperator(fwhm=0)
-            hp.gnomview(C_reconv(C(components[1, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
-            hp.gnomview(C_reconv(solution['x'][1, :, 1]), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
-            hp.gnomview(C_reconv(solution['x'][1, :, 1]) - C_reconv(C(components[1, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 3))
-            plt.savefig(f'comp1_{type}_seed{seed}_iteration{iteration}_Iter{k+1}.png')
-            plt.close()
+            for i in range(len(comp)):
+                plt.figure(figsize=(15, 5))
+                
+                if convolution:
+                    C_reconv = HealpixConvolutionGaussianOperator(fwhm=np.sqrt(myqubic.allfwhm[0]**2 - myqubic.allfwhm[-1]**2))
+                    C = HealpixConvolutionGaussianOperator(fwhm=myqubic.allfwhm[-1])
+                else:
+                    C_reconv = HealpixConvolutionGaussianOperator(fwhm=0)#np.sqrt(myqubic.allfwhm[0]**2 - fake_convolution**2))#myqubic.allfwhm[0])
+                    C = HealpixConvolutionGaussianOperator(fwhm=0)
+                sig = np.std(C_reconv(C(components[i, :, 1])))
+                hp.gnomview(C_reconv(C(components[i, :, 1])), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 1))
+                hp.gnomview(C_reconv(solution['x'][i, :, 1]), rot=center, reso=15, cmap='jet', min=-6, max=6, sub=(1, 3, 2))
+                hp.gnomview(C_reconv(solution['x'][i, :, 1]) - C_reconv(C(components[i, :, 1])), rot=center, reso=15
+                            , cmap='jet', min=-0.5, max=0.5, sub=(1, 3, 3))
+                plt.savefig(f'images/comp{i}_{type}_seed{seed}_iteration{iteration}_Iter{k+1}.png')
+                plt.close()
     
     ### Compute spectra
     components_i = solution['x'].copy()
@@ -538,8 +578,8 @@ while k < kmax :
         g220_est /= g220_est[0]
 
         g_i = np.array([g150_est, g220_est])
-        print(g_i[0, :5])
-        print(g_i[1, :5])
+        #print(g_i[0, :5])
+        #print(g_i[1, :5])
     elif type == 'Wide':
         
         todw_i = _r(H_i(components_i).ravel()[:(myqubic.Ndets*myqubic.Nsamples)])
@@ -548,7 +588,7 @@ while k < kmax :
         gw_est /= gw_est[0]
         
         g_i = np.array([gw_est])
-        print(g_i[0, :5])
+        #print(g_i[0, :5])
 
     ###################################
     ######## Beta minimization ########
@@ -560,11 +600,11 @@ while k < kmax :
     elif type == 'Two':
         chi2 = partial(chi2_tot, solution=components_for_beta)
     
-    ### Doing minimization
-    beta_i = minimize(chi2, x0=np.array([1.5]), method=str(method), tol=tol_beta).x
-    
-    print(beta_i)
-    
+    if len(beta) > 0:
+        ### Doing minimization
+        beta_i = minimize(chi2, x0=beta, method=str(method), tol=tol_beta).x
+        if rank == 0:
+            print(beta_i)
     ### Saving components, beta, gain, convergence, etc.. for each iteration
     if rank == 0:
         if save_each_ite is not None:
@@ -574,7 +614,7 @@ while k < kmax :
                     os.remove(path_to_save+'/Iter{}_maps_beta_gain_rms_maps.pkl'.format(k))
 
 
-            dict_i = {'maps':components_i, 'beta':beta_i, 'allfwhm':myqubic.allfwhm, 'coverage':coverage, 'convergence':solution['error']}
+            dict_i = {'maps':components_i, 'beta':beta_i, 'allfwhm':myqubic.allfwhm, 'coverage':coverage, 'pixok':pixok1, 'convergence':solution['error']}
     
             output = open(path_to_save+'/Iter{}_maps_beta_gain_rms_maps.pkl'.format(k+1), 'wb')
             pickle.dump(dict_i, output)
