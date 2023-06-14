@@ -31,4 +31,4 @@ echo $interface
 eval "$(/soft/anaconda3/bin/conda shell.bash hook)"
 conda activate myqubic
 
-mpirun $interface -np $SLURM_NTASKS python cmm_mpi.py $1 $2 $3 $4 $5
+mpirun $interface -np $SLURM_NTASKS python cmm_mpi.py $1 $2

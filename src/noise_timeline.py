@@ -4,7 +4,7 @@ import numpy as np
 
 class QubicNoise:
     
-    def __init__(self, band, npointings, comm=None, size=1):
+    def __init__(self, band, npointings, comm=None, size=1, detector_nep=4.7e-17):
         
         if band != 150 and band != 220:
             raise TypeError('Please choose the QubicWideBandNoise method.')
@@ -17,6 +17,7 @@ class QubicNoise:
         d['TemperatureAtmosphere220']=None
         d['EmissivityAtmosphere150']=None
         d['EmissivityAtmosphere220']=None
+        d['detector_nep'] = detector_nep
 
         d['npointings'] = npointings
         d['comm'] = comm
@@ -53,16 +54,17 @@ class QubicNoise:
     
 class QubicWideBandNoise:
     
-    def __init__(self, d, npointings):
+    def __init__(self, d, npointings, detector_nep=4.7e-17):
     
         self.d = d
         self.npointings = npointings
+        self.detector_nep = detector_nep
         
         
     def total_noise(self, wdet, wpho150, wpho220):
         
-        Qubic150 = QubicNoise(150, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'])
-        Qubic220 = QubicNoise(220, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'])
+        Qubic150 = QubicNoise(150, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'], detector_nep=self.detector_nep)
+        Qubic220 = QubicNoise(220, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'], detector_nep=self.detector_nep)
         
         ndet = wdet * Qubic150.detector_noise()
         npho150 = wpho150 * Qubic150.photon_noise()
@@ -73,15 +75,16 @@ class QubicWideBandNoise:
 
 class QubicDualBandNoise:
 
-    def __init__(self, d, npointings):
+    def __init__(self, d, npointings, detector_nep=4.7e-17):
 
         self.d = d
         self.npointings = npointings
+        self.detector_nep = detector_nep
 
     def total_noise(self, wdet, wpho150, wpho220):
         
-        Qubic150 = QubicNoise(150, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'])
-        Qubic220 = QubicNoise(220, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'])
+        Qubic150 = QubicNoise(150, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'], detector_nep=self.detector_nep)
+        Qubic220 = QubicNoise(220, self.npointings, comm=self.d['comm'], size=self.d['nprocs_instrument'], detector_nep=self.detector_nep)
         
         ndet = wdet * Qubic150.detector_noise().ravel()
         npho150 = wpho150 * Qubic150.photon_noise().ravel()

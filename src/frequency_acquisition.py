@@ -24,7 +24,7 @@ import pysm3
 import sys
 import os
 sys.path.append(os.path.dirname(os.getcwd()))
-path = os.path.dirname(os.path.dirname(os.path.dirname(os.getcwd()))) + '/data/'
+path = os.path.dirname(os.getcwd()) + '/data/'
 import gc
 import time
 import warnings
@@ -1827,7 +1827,7 @@ class QubicFullBand(QubicPolyAcquisition):
         self.Nsub = int(Nsub/2)
         self.Nrec = Nrec
         self.d['nf_sub'] = self.Nsub
-        self.d['nf_recon'] = Nrec
+        self.d['nf_recon'] = self.Nrec
         self.kind = 'Wide'
         self.number_FP = 1
         
